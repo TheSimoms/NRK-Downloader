@@ -1,6 +1,7 @@
 import re
 import urllib2
 import subprocess
+import sys
 
 from bs4 import BeautifulSoup
 from urlparse import urlparse
@@ -237,8 +238,14 @@ def main(url):
             print('Stopping download')
 
             break
-        except:
-            print('Could not download episode %s' % episode_url['url'])
+        except Exception as e:
+            print('Could not download episode %s\nReason: %s' % (episode_url['url'], e))
 
 
-main('https://tv.nrk.no/serie/broedrene-dal-og-professor-droevels-hemmelighet')
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print('You need to supply a link for the episode or show to download')
+        
+        sys.exit(1)
+
+    main(sys.argv[1])
