@@ -32,9 +32,7 @@ def parse_url(url):
     :return: Parsed URL
     """
 
-    url = url if url[-1] == '/' else '%s/' % url
-
-    return url
+    return url if url[-1] == '/' else '%s/' % url
 
 
 def get_url_info(url):
