@@ -17,12 +17,13 @@ except ImportError:
 NRK_URL_PREFIX = 'https://tv.nrk.no'
 NRK_URL_REGEX_PREFIX = '(?:https?://)tv\.nrk\.no/'
 
-FILE_EXTENSIONS = ('mkv', 'avi')
-
 
 class NRKDownloader:
     def __init__(self):
-        pass
+        self.path = ""
+        self.file_extensions = ('mkv', 'avi', )
+        self.file_extension = self.file_extensions[0]
+        self.urls = []
 
     @staticmethod
     def is_valid_url(url):
@@ -224,7 +225,7 @@ class NRKDownloader:
         :param playlist_url: URL to playlist
         """
 
-        file_name = '%s.%s' % (self.generate_file_name(playlist_url['info']), FILE_EXTENSIONS[0])
+        file_name = '%s.%s' % (self.generate_file_name(playlist_url['info']), self.file_extension)
 
         logging.info('%s: Downloading episode to file' % file_name)
 
@@ -238,36 +239,45 @@ class NRKDownloader:
             file_name
         ], stdout=DEVNULL, stderr=subprocess.STDOUT)
 
-    def download(self, urls):
+    def download_multiple(self, urls):
+        for url in urls:
+            self.download(url)
+
+    def download(self, url):
         """
         Download episode(s) from NRK TV URL(s)
 
         :param urls: NRK TV URL(s)
         """
 
-        for url in urls:
-            try:
-                logging.info('URL: %s' % url)
+        logging.info('URL: %s' % url)
 
-                url = self.parse_url(url)
-                url_info = self.get_url_info(url)
+        url = self.parse_url(url)
 
-                episode_urls = self.get_episode_urls(url, url_info)
+        if not self.is_valid_url(url):
+            logging.error('%s: Invalid URL. Skipping' % url)
 
-                for episode_url in episode_urls:
-                    try:
-                        episode_playlist_url = self.get_episode_playlist_url(episode_url)
-                        self.download_episode(episode_playlist_url)
-                    except KeyboardInterrupt:
-                        logging.info('Stopping download')
+            return
 
-                        break
-                    except Exception as e:
-                        logging.error('%s: Could not download episode\nReason: %s' % (episode_url['url'], e))
+        try:
+            url_info = self.get_url_info(url)
 
-                logging.info('Download complete')
-            except Exception as e:
-                logging.error('%s: An unknown error occurred. Skipping' % url)
+            episode_urls = self.get_episode_urls(url, url_info)
+
+            for episode_url in episode_urls:
+                try:
+                    episode_playlist_url = self.get_episode_playlist_url(episode_url)
+                    self.download_episode(episode_playlist_url)
+                except KeyboardInterrupt:
+                    logging.info('Stopping download')
+
+                    break
+                except Exception as e:
+                    logging.error('%s: Could not download episode\nReason: %s' % (episode_url['url'], e))
+
+            logging.info('Download complete')
+        except Exception as e:
+            logging.error('%s: An unknown error occurred. Skipping' % url)
 
 
 if __name__ == "__main__":
@@ -278,4 +288,4 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    NRKDownloader().download(sys.argv[1:])
+    NRKDownloader().download_multiple(sys.argv[1:])
