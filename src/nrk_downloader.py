@@ -189,7 +189,11 @@ class NRKDownloader:
                 'info': url['info']
             }
 
+            logging.debug('Playlist URL: %s' % playlist_url)
+
             return playlist_url
+        else:
+            logging.debug('No playlist URL found')
 
     @staticmethod
     def dashed_to_dotted(string):
@@ -228,36 +232,47 @@ class NRKDownloader:
         file_name = '%s.%s' % (self.generate_file_name(playlist_url['info']), self.file_extension)
 
         logging.info('%s: Downloading episode to file' % file_name)
+        logging.debug('Playlist URL: %s' % playlist_url['url'])
 
-        subprocess.call([
+        pipe = subprocess.Popen([
             'avconv',
             '-y',
             '-i',
             playlist_url['url'],
             '-c',
             'copy',
-            file_name
-        ], stdout=DEVNULL, stderr=subprocess.STDOUT)
+            '%s%s' % (self.path, file_name)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        text = pipe.communicate()
+
+        print text
 
     def download_multiple(self, urls):
+        success = True
+
         for url in urls:
-            self.download(url)
+            success = success and self.download(url)
+
+        return success
 
     def download(self, url):
         """
-        Download episode(s) from NRK TV URL(s)
+        Download episode(s) from NRK TV URL
 
-        :param urls: NRK TV URL(s)
+        :param url: NRK TV URL
+        :return Whether all episodes were downloaded successfully or not
         """
 
         logging.info('URL: %s' % url)
 
+        success = True
         url = self.parse_url(url)
 
         if not self.is_valid_url(url):
             logging.error('%s: Invalid URL. Skipping' % url)
 
-            return
+            return False
 
         try:
             url_info = self.get_url_info(url)
@@ -267,17 +282,24 @@ class NRKDownloader:
             for episode_url in episode_urls:
                 try:
                     episode_playlist_url = self.get_episode_playlist_url(episode_url)
+
                     self.download_episode(episode_playlist_url)
                 except KeyboardInterrupt:
                     logging.info('Stopping download')
 
-                    break
+                    return False
                 except Exception as e:
                     logging.error('%s: Could not download episode\nReason: %s' % (episode_url['url'], e))
+
+                    success = False
 
             logging.info('Download complete')
         except Exception as e:
             logging.error('%s: An unknown error occurred. Skipping' % url)
+
+            return False
+
+        return True and success
 
 
 if __name__ == "__main__":
