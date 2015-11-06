@@ -2,248 +2,280 @@ import re
 import urllib2
 import subprocess
 import sys
+import logging
+import os
 
 from bs4 import BeautifulSoup
 from urlparse import urlparse
+
+try:
+    from subprocess import DEVNULL
+except ImportError:
+    DEVNULL = open(os.devnull, 'wb')
 
 
 NRK_URL_PREFIX = 'https://tv.nrk.no'
 NRK_URL_REGEX_PREFIX = '(?:https?://)tv\.nrk\.no/'
 
-FILE_EXTENSION = 'mkv'
+FILE_EXTENSIONS = ('mkv', 'avi')
 
 
-def is_valid_url(url):
-    """
-    Check whether an URL is a valid NRK URL or not
+class NRKDownloader:
+    def __init__(self):
+        pass
 
-    :param url: URL to check
-    :return: Whether the URL is valid or not
-    """
+    @staticmethod
+    def is_valid_url(url):
+        """
+        Check whether an URL is a valid NRK URL or not
 
-    return re.match(NRK_URL_PREFIX, url) is not None
+        :param url: URL to check
+        :return: Whether the URL is valid or not
+        """
 
+        return re.match(NRK_URL_PREFIX, url) is not None
 
-def parse_url(url):
-    """
-    Parse URL. Make sure it fits the script's URL format
+    @staticmethod
+    def parse_url(url):
+        """
+        Parse URL. Make sure it fits the script's URL format
 
-    :param url: URL to parse
-    :return: Parsed URL
-    """
+        :param url: URL to parse
+        :return: Parsed URL
+        """
 
-    return url if url[-1] == '/' else '%s/' % url
+        return url if url[-1] == '/' else '%s/' % url
 
+    @staticmethod
+    def get_url_info(url):
+        """
+        Extract episode info (category, show name etc.)
 
-def get_url_info(url):
-    """
-    Extract episode info (category, show name etc.)
+        :param url: URL to extract info for
+        :return: Dictionary containing episode info
+        """
 
-    :param url: URL to extract info for
-    :return: Dictionary containing episode info
-    """
+        info = {}
+        paths = urlparse(url).path[1:].split('/')[:-1]
 
-    info = {}
-    paths = urlparse(url).path[1:].split('/')[:-1]
+        for path in paths:
+            if 'category' not in info:
+                info['category'] = path
+            elif 'show' not in info:
+                info['show'] = path
+            elif 'episode_id' not in info:
+                info['episode_id'] = path
+            elif 'season' not in info:
+                info['season'] = path
+            elif 'episode' not in info:
+                info['episode'] = path
 
-    for path in paths:
-        if 'category' not in info:
-            info['category'] = path
-        elif 'show' not in info:
-            info['show'] = path
-        elif 'episode_id' not in info:
-            info['episode_id'] = path
-        elif 'season' not in info:
-            info['season'] = path
-        elif 'episode' not in info:
-            info['episode'] = path
+        if 'episode' not in info and 'episode_id' in info:
+            info['episode'] = info['season']
 
-    if 'episode' not in info and 'episode_id' in info:
-        info['episode'] = info['season']
+            del info['season']
 
-        del info['season']
+        return info
 
-    return info
+    @staticmethod
+    def get_url_soup(url):
+        """
+        Get BeautifulSoup for URL
 
+        :param url: URL to get soup for
+        :return: Soup for URL
+        """
 
-def get_url_soup(url):
-    """
-    Get BeautifulSoup for URL
+        page = urllib2.urlopen(url).read()
 
-    :param url: URL to get soup for
-    :return: Soup for URL
-    """
+        soup = BeautifulSoup(page)
+        soup.prettify()
 
-    page = urllib2.urlopen(url).read()
+        return soup
 
-    soup = BeautifulSoup(page)
-    soup.prettify()
+    def get_show_episode_list_urls(self, url):
+        """
+        Get URLs for episode list for each season in show
 
-    return soup
+        :param url: Show URL
+        :return: List of episode list URLs
+        """
 
+        logging.info('%s: Fetching episode list URLs' % url)
 
-def get_show_episode_list_urls(url):
-    """
-    Get URLs for episode list for each season in show
+        soup = self.get_url_soup(url)
+        episode_list_urls = []
 
-    :param url: Show URL
-    :return: List of episode list URLs
-    """
+        for link in soup.find_all('a', class_='ga season-link'):
+            try:
+                int(link.get('data-identifier'))
 
-    print('Fetching episode list URLs')
+                episode_list_urls.append('%s%s' % (NRK_URL_PREFIX, link.get('href')))
+            except ValueError:
+                logging.error('%s: Could not find episode list' % url)
 
-    soup = get_url_soup(url)
-    episode_list_urls = []
+        return episode_list_urls
 
-    for link in soup.find_all('a', class_='ga season-link'):
-        try:
-            int(link.get('data-identifier'))
+    def get_show_episode_urls(self, url):
+        """
+        Get list of episode URLs for show
 
-            episode_list_urls.append('%s%s' % (NRK_URL_PREFIX, link.get('href')))
-        except ValueError:
-            pass
+        :param url: Show URL
+        :return: List of episode URLs
+        """
 
-    return episode_list_urls
+        logging.info('%s: URL is for a show. Fetching URLs for all episodes' % url)
 
+        episode_list_urls = self.get_show_episode_list_urls(url)
+        episode_urls = []
 
-def get_show_episode_urls(url):
-    """
-    Get list of episode URLs for show
+        for episode_list_url in episode_list_urls:
+            soup = self.get_url_soup(episode_list_url)
 
-    :param url: Show URL
-    :return: List of episode URLs
-    """
+            for episode_list in soup.find_all('ul', class_='episode-list'):
+                for list_item in episode_list.find_all('li', class_='episode-item'):
+                    url = self.parse_url('%s%s' % (NRK_URL_PREFIX, list_item.find('a', class_='clearfix').get('href')))
+                    info = self.get_url_info(url)
 
-    print('URL is for a show. Fetching URLs for all episodes')
+                    episode_urls.append({
+                        'url': url,
+                        'info': info
+                    })
 
-    episode_list_urls = get_show_episode_list_urls(url)
-    episode_urls = []
+        return episode_urls
 
-    for episode_list_url in episode_list_urls:
-        soup = get_url_soup(episode_list_url)
+    def get_episode_urls(self, url, url_info):
+        """
+        Convert general NRK URL to list of episode URLs
 
-        for episode_list in soup.find_all('ul', class_='episode-list'):
-            for list_item in episode_list.find_all('li', class_='episode-item'):
-                url = parse_url('%s%s' % (NRK_URL_PREFIX, list_item.find('a', class_='clearfix').get('href')))
-                info = get_url_info(url)
+        :param url: URL specified by the user. Might be show, season or episode URL
+        :return: List of episode URLs
+        """
 
-                episode_urls.append({
-                    'url': url,
-                    'info': info
-                })
+        logging.info('%s: Fetching episode URL(s)' % url)
 
-    return episode_urls
+        if 'episode_id' in url_info:
+            return [{
+                'url': url,
+                'info': url_info
+            }]
 
+        return self.get_show_episode_urls(url)
 
-def get_episode_urls(url, url_info):
-    """
-    Convert general NRK URL to list of episode URLs
+    def get_episode_playlist_url(self, url):
+        """
+        Fetch episode playlist URL for episode
 
-    :param url: URL specified by the user. Might be show, season or episode URL
-    :return: List of episode URLs
-    """
+        :param url: Episode URL
+        :return: Episode playlist URL
+        """
 
-    print('Fetching episode URL')
+        logging.info('%s: Fetching playlist URL' % url['url'])
 
-    if 'episode_id' in url_info:
-        return [{
-            'url': url,
-            'info': url_info
-        }]
+        soup = self.get_url_soup(url['url'])
 
-    return get_show_episode_urls(url)
+        player_element = soup.find(id='playerelement')
 
+        if player_element.get('data-media'):
+            playlist_url = player_element.get('data-media')
 
-def get_episode_playlist_url(url):
-    """
-    Fetch episode playlist URL for episode
+            playlist_url = playlist_url.replace('/z/', '/i/')
+            playlist_url = playlist_url.replace('manifest.f4m', 'master.m3u8')
+            playlist_url = playlist_url.replace('master.m3u8', 'index_4_av.m3u8')
 
-    :param url: Episode URL
-    :return: Episode playlist URL
-    """
+            playlist_url = {
+                'url': playlist_url,
+                'info': url['info']
+            }
 
-    print('Fetching playlist URL for %s' % url['url'])
+            return playlist_url
 
-    soup = get_url_soup(url['url'])
+    @staticmethod
+    def dashed_to_dotted(string):
+        """
+        Replace dash with dot in string
 
-    player_element = soup.find(id='playerelement')
+        :param string: String to edit
+        """
 
-    if player_element.get('data-media'):
-        playlist_url = player_element.get('data-media')
+        return string.replace('-', '.').lower()
 
-        playlist_url = playlist_url.replace('/z/', '/i/')
-        playlist_url = playlist_url.replace('manifest.f4m', 'master.m3u8')
-        playlist_url = playlist_url.replace('master.m3u8', 'index_4_av.m3u8')
+    def generate_file_name(self, info):
+        """
+        Generate episode file name
 
-        playlist_url = {
-            'url': playlist_url,
-            'info': url['info']
-        }
+        :param info: Dictionary with info of file to generate file name for
+        :return Episode file name
+        """
 
-        return playlist_url
+        file_name = self.dashed_to_dotted(info['show'])
 
+        if 'season' in info:
+            file_name += '.%s' % self.dashed_to_dotted(info['season'])
 
-def dashed_to_dotted(string):
-    return string.replace('-', '.').lower()
+        file_name += '.%s' % self.dashed_to_dotted(info['episode'])
 
+        return file_name
 
-def get_file_name(info):
-    file_name = dashed_to_dotted(info['show'])
+    def download_episode(self, playlist_url):
+        """
+        Download episode from playlist URL
 
-    if 'season' in info:
-        file_name += '.%s' % dashed_to_dotted(info['season'])
+        :param playlist_url: URL to playlist
+        """
 
-    file_name += '.%s' % dashed_to_dotted(info['episode'])
+        file_name = '%s.%s' % (self.generate_file_name(playlist_url['info']), FILE_EXTENSIONS[0])
 
-    return file_name
+        logging.info('%s: Downloading episode to file' % file_name)
 
+        subprocess.call([
+            'avconv',
+            '-y',
+            '-i',
+            playlist_url['url'],
+            '-c',
+            'copy',
+            file_name
+        ], stdout=DEVNULL, stderr=subprocess.STDOUT)
 
-def download_episode(playlist_url):
-    """
-    Download episode from playlist URL
+    def download(self, urls):
+        """
+        Download episode(s) from NRK TV URL(s)
 
-    :param playlist_url: URL to playlist
-    :return: Path to downloaded episode
-    """
+        :param urls: NRK TV URL(s)
+        """
 
-    file_name = '%s.%s' % (get_file_name(playlist_url['info']), FILE_EXTENSION)
+        for url in urls:
+            try:
+                logging.info('URL: %s' % url)
 
-    print('Downloading episode to file %s' % file_name)
+                url = self.parse_url(url)
+                url_info = self.get_url_info(url)
 
-    subprocess.call([
-        'avconv',
-        '-i',
-        playlist_url['url'],
-        '-c',
-        'copy',
-        file_name
-    ], stdout=subprocess.PIPE)
+                episode_urls = self.get_episode_urls(url, url_info)
 
+                for episode_url in episode_urls:
+                    try:
+                        episode_playlist_url = self.get_episode_playlist_url(episode_url)
+                        self.download_episode(episode_playlist_url)
+                    except KeyboardInterrupt:
+                        logging.info('Stopping download')
 
-def main(url):
-    print 'URL: %s' % url
+                        break
+                    except Exception as e:
+                        logging.error('%s: Could not download episode\nReason: %s' % (episode_url['url'], e))
 
-    url = parse_url(url)
-    url_info = get_url_info(url)
-
-    episode_urls = get_episode_urls(url, url_info)
-
-    for episode_url in episode_urls:
-        try:
-            episode_playlist_url = get_episode_playlist_url(episode_url)
-            download_episode(episode_playlist_url)
-        except KeyboardInterrupt:
-            print('Stopping download')
-
-            break
-        except Exception as e:
-            print('Could not download episode %s\nReason: %s' % (episode_url['url'], e))
+                logging.info('Download complete')
+            except Exception as e:
+                logging.error('%s: An unknown error occurred. Skipping' % url)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print('You need to supply a link for the episode or show to download')
-        
+    if len(sys.argv) < 2:
+        logging.error('You need to supply at least one link for an episode to download')
+
         sys.exit(1)
 
-    main(sys.argv[1])
+    logging.basicConfig(level=logging.INFO)
+
+    NRKDownloader().download(sys.argv[1:])
