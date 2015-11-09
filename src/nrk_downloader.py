@@ -246,8 +246,6 @@ class NRKDownloader:
 
         text = pipe.communicate()
 
-        print text
-
     def download_multiple(self, urls):
         success = True
 
