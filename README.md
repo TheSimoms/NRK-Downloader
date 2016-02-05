@@ -4,7 +4,7 @@ Download episodes or whole shows from tv.nrk.no.
 The downloader uses episode URLs (for example https://tv.nrk.no/serie/side-om-side/MUHH50000113/sesong-1/episode-1) and show URLs (for example https://tv.nrk.no/serie/side-om-side) for choosing what files to download.
 
 ## Requirements
-* ffmpeg
+* avconv (apt-get install libav-tools)
 * Python 2.7
   * BeautifulSoup
   * TkInter (only for the graphical user interface)
