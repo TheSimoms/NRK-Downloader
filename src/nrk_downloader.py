@@ -1,12 +1,21 @@
 import re
-import urllib2
 import subprocess
 import sys
 import logging
 import os
 
 from bs4 import BeautifulSoup
-from urlparse import urlparse
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as ec
+
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urllib2 import urlparse
 
 try:
     from subprocess import DEVNULL
@@ -25,6 +34,9 @@ class NRKDownloader:
         self.file_extension = self.file_extensions[0]
         self.urls = []
 
+        self.driver = webdriver.PhantomJS(service_args=['--ssl-protocol=any'])
+        self.set_preferred_player()
+
     @staticmethod
     def is_valid_url(url):
         """
@@ -34,7 +46,7 @@ class NRKDownloader:
         :return: Whether the URL is valid or not
         """
 
-        return re.match(NRK_URL_PREFIX, url) is not None
+        return re.match(NRK_URL_REGEX_PREFIX, url) is not None
 
     @staticmethod
     def parse_url(url):
@@ -78,8 +90,13 @@ class NRKDownloader:
 
         return info
 
-    @staticmethod
-    def get_url_soup(url):
+    def set_preferred_player(self):
+        self.driver.get('https://tv.nrk.no/innstillinger')
+
+        self.driver.find_element(By.ID, 'rbhlslinkodm').click()
+        self.driver.find_element(By.CLASS_NAME, 'save-settings').click()
+
+    def get_url_soup(self, url, wait_for_player=False):
         """
         Get BeautifulSoup for URL
 
@@ -87,14 +104,20 @@ class NRKDownloader:
         :return: Soup for URL
         """
 
-        page = urllib2.urlopen(url).read()
+        self.driver.get(url)
 
-        soup = BeautifulSoup(page)
-        soup.prettify()
+        if wait_for_player:
+            wrapper = WebDriverWait(self.driver, 5).until(ec.presence_of_element_located((
+                'id', 'nrk-player-wrapper'
+            )))
 
-        return soup
+            WebDriverWait(wrapper, 5).until(ec.presence_of_element_located((
+                By.CSS_SELECTOR, 'a[href*="master.m3u8"]'
+            )))
 
-    def get_show_episode_list_urls(self, url):
+        return BeautifulSoup(self.driver.page_source, "lxml")
+
+    def get_show_episode_list_urls(self, url, info):
         """
         Get URLs for episode list for each season in show
 
@@ -109,9 +132,11 @@ class NRKDownloader:
 
         for link in soup.find_all('a', class_='ga season-link'):
             try:
-                int(link.get('data-identifier'))
+                season_id = int(link.get('data-identifier'))
 
-                episode_list_urls.append('%s%s' % (NRK_URL_PREFIX, link.get('href')))
+                episode_list_urls.append(
+                    '%s/program/Episodes/%s/%s' % (NRK_URL_PREFIX, info['show'], season_id)
+                )
             except ValueError:
                 logging.error('%s: Could not find episode list' % url)
 
@@ -127,7 +152,7 @@ class NRKDownloader:
 
         logging.info('%s: URL is for a show. Fetching URLs for all episodes' % url)
 
-        episode_list_urls = self.get_show_episode_list_urls(url)
+        episode_list_urls = self.get_show_episode_list_urls(url, self.get_url_info(url))
         episode_urls = []
 
         for episode_list_url in episode_list_urls:
@@ -135,7 +160,9 @@ class NRKDownloader:
 
             for episode_list in soup.find_all('ul', class_='episode-list'):
                 for list_item in episode_list.find_all('li', class_='episode-item'):
-                    url = self.parse_url('%s%s' % (NRK_URL_PREFIX, list_item.find('a', class_='clearfix').get('href')))
+                    url = self.parse_url('%s%s' % (
+                        NRK_URL_PREFIX, list_item.find('a', class_='clearfix').get('href')
+                    ))
                     info = self.get_url_info(url)
 
                     episode_urls.append({
@@ -173,12 +200,12 @@ class NRKDownloader:
 
         logging.info('%s: Fetching playlist URL' % url['url'])
 
-        soup = self.get_url_soup(url['url'])
+        soup = self.get_url_soup(url['url'], True)
 
-        player_element = soup.find(id='playerelement')
+        play_button = soup.find(id='nrk-player-wrapper').find(class_='play-icon-action')
 
-        if player_element.get('data-media'):
-            playlist_url = player_element.get('data-media')
+        if play_button:
+            playlist_url = play_button.get('href')
 
             playlist_url = playlist_url.replace('/z/', '/i/')
             playlist_url = playlist_url.replace('manifest.f4m', 'master.m3u8')
@@ -188,8 +215,6 @@ class NRKDownloader:
                 'url': playlist_url,
                 'info': url['info']
             }
-
-            logging.debug('Playlist URL: %s' % playlist_url)
 
             return playlist_url
         else:
@@ -234,17 +259,15 @@ class NRKDownloader:
         logging.info('%s: Downloading episode to file' % file_name)
         logging.debug('Playlist URL: %s' % playlist_url['url'])
 
-        pipe = subprocess.Popen([
-            'avconv',
-            '-y',
+        args = [
+            'ffmpeg',
             '-i',
             playlist_url['url'],
-            '-c',
-            'copy',
             '%s%s' % (self.path, file_name)
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ]
 
-        text = pipe.communicate()
+        pipe = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        pipe.communicate()
 
     def download_multiple(self, urls):
         success = True
@@ -281,19 +304,23 @@ class NRKDownloader:
                 try:
                     episode_playlist_url = self.get_episode_playlist_url(episode_url)
 
-                    self.download_episode(episode_playlist_url)
+                    if episode_url is not None:
+                        self.download_episode(episode_playlist_url)
                 except KeyboardInterrupt:
                     logging.info('Stopping download')
 
                     return False
                 except Exception as e:
-                    logging.error('%s: Could not download episode\nReason: %s' % (episode_url['url'], e))
+                    logging.error(
+                        '%s: Could not download episode\nReason: %s' % (episode_url['url'], e)
+                    )
 
                     success = False
 
             logging.info('Download complete')
         except Exception as e:
             logging.error('%s: An unknown error occurred. Skipping' % url)
+            logging.error('Reason: %s' % e)
 
             return False
 
