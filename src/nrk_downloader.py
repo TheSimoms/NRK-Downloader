@@ -1,8 +1,8 @@
 import re
 import subprocess
-import sys
 import logging
 import os
+import argparse
 
 from bs4 import BeautifulSoup
 
@@ -247,7 +247,7 @@ class NRKDownloader:
 
         return file_name
 
-    def download_episode(self, playlist_url):
+    def download_episode(self, playlist_url, debug=False):
         """
         Download episode from playlist URL
 
@@ -266,18 +266,22 @@ class NRKDownloader:
             '%s%s' % (self.path, file_name)
         ]
 
-        pipe = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if debug:
+            pipe = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        else:
+            pipe = subprocess.Popen(args)
+
         pipe.communicate()
 
-    def download_multiple(self, urls):
+    def download_multiple(self, urls, debug=False):
         success = True
 
         for url in urls:
-            success = success and self.download(url)
+            success = success and self.download(url, debug)
 
         return success
 
-    def download(self, url):
+    def download(self, url, debug=False):
         """
         Download episode(s) from NRK TV URL
 
@@ -328,11 +332,16 @@ class NRKDownloader:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        logging.error('You need to supply at least one link for an episode to download')
+    parser = argparse.ArgumentParser()
 
-        sys.exit(1)
+    parser.add_argument('-u', '--urls', type=str, help='Comma separated list of NRK URLS')
+    parser.add_argument('--debug', help='Show debug output', action="store_true")
 
-    logging.basicConfig(level=logging.INFO)
+    args = parser.parse_args()
 
-    NRKDownloader().download_multiple(sys.argv[1:])
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    NRKDownloader().download_multiple(args.urls.split(','), debug=args.debug)
