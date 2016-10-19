@@ -32,6 +32,7 @@ class NRKDownloader:
         self.urls = args.urls.split(',')
         self.file_extension = args.extension
         self.download_path = self.prepare_path(args.save_dir)
+        self.include_subtitles = args.subtitles
         self.debug = args.debug
 
         self.driver = webdriver.PhantomJS(service_args=['--ssl-protocol=any'])
@@ -249,6 +250,20 @@ class NRKDownloader:
         else:
             logging.debug('No playlist URL found')
 
+    def get_subtitle_playlist_url(self, url):
+        """
+        Fetch subtitle playlist URL for episode
+
+        :param url: Episode URL
+        :return: Subtitle playlist URL
+        """
+
+        episode_id = url['info']['episode_id']
+
+        return 'https://undertekst.nrk.no/prod/%s/%s/%sAA/TMP/master.m3u8' % (
+            episode_id[:6], episode_id[6:8], episode_id
+        )
+
     def generate_file_name(self, info):
         """
         Generate episode file name
@@ -267,32 +282,23 @@ class NRKDownloader:
         return file_name
 
     def generate_file_path(self, path, file_name):
+        """
+        Generate full file path from path name and file name
+
+        :param path: Dir path
+        :param file_name: File name
+        :return Full file path
+        """
+
         if path is '':
             return file_name
 
         return '%s/%s' % (path, file_name)
 
-    def download_episode(self, playlist_url):
+    def run_system_command(self, args):
         """
-        Download episode from playlist URL
-
-        :param playlist_url: URL to playlist
+        Run system command using the supplied arguments
         """
-
-        file_name = '%s.%s' % (self.generate_file_name(playlist_url['info']), self.file_extension)
-        file_path = self.generate_file_path(self.download_path, file_name)
-
-        logging.info('%s: Downloading episode to file' % file_name)
-        logging.debug('Playlist URL: %s' % playlist_url['url'])
-
-        args = [
-            'ffmpeg',
-            '-i',
-            playlist_url['url'],
-            file_path,
-            '-c',
-            'copy',
-        ]
 
         if self.debug:
             pipe = subprocess.Popen(args)
@@ -300,6 +306,43 @@ class NRKDownloader:
             pipe = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         pipe.communicate()
+
+    def download_episode(self, episode_url, subtitle_url=None):
+        """
+        Download episode from playlist URL
+
+        :param episode_url: URL to episode
+        :param subtitle_url: URL to subtitles
+        """
+
+        file_path = self.generate_file_path(
+            self.download_path, self.generate_file_name(episode_url['info'])
+        )
+
+        episode_path = '%s.%s' % (file_path, self.file_extension)
+        subtitle_path = '%s.vtt' % file_path
+
+        logging.info('%s: Downloading episode to file' % episode_path)
+        logging.debug('Playlist URL: %s' % episode_url['url'])
+
+        self.run_system_command([
+            'ffmpeg',
+            '-i',
+            episode_url['url'],
+            episode_path,
+            '-c',
+            'copy',
+        ])
+
+        if subtitle_url is not None:
+            self.run_system_command([
+                'ffmpeg',
+                '-i',
+                subtitle_url,
+                subtitle_path,
+                '-c',
+                'copy',
+            ])
 
     def start(self):
         """
@@ -340,9 +383,13 @@ class NRKDownloader:
             for episode_url in episode_urls:
                 try:
                     episode_playlist_url = self.get_episode_playlist_url(episode_url)
+                    subtitle_playlist_url = None
+
+                    if self.include_subtitles:
+                        subtitle_playlist_url = self.get_subtitle_playlist_url(episode_url)
 
                     if episode_url is not None:
-                        self.download_episode(episode_playlist_url)
+                        self.download_episode(episode_playlist_url, subtitle_playlist_url)
                 except KeyboardInterrupt:
                     logging.info('Stopping download')
 
@@ -380,6 +427,7 @@ if __name__ == "__main__":
         '-s', '--save_dir', help='Path to save downloaded files in. Defaults to current path',
         default=''
     )
+    parser.add_argument('--subtitles', help='Include subtitles', action='store_true')
     parser.add_argument('--debug', help='Show debug output', action='store_true')
 
     args = parser.parse_args()
