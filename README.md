@@ -5,9 +5,11 @@ The downloader uses episode URLs (for example https://tv.nrk.no/serie/side-om-si
 
 ## Requirements
 * ffmpeg (apt-get install libav-tools in Ubuntu)
+* PhantomJS
 * Python 3
   * BeautifulSoup
   * Requests
+  * Selenium
 
 ## Running
 The downloader can be run using the command line.
