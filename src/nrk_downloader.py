@@ -28,14 +28,39 @@ NRK_URL_REGEX_PREFIX = '(?:https?://)tv\.nrk\.no/'
 
 
 class NRKDownloader:
-    def __init__(self):
-        self.path = ""
-        self.file_extensions = ('mkv', 'avi', )
-        self.file_extension = self.file_extensions[0]
-        self.urls = []
+    def __init__(self, args):
+        self.urls = args.urls.split(',')
+        self.file_extension = args.extension
+        self.download_path = self.prepare_path(args.save_dir)
+        self.debug = args.debug
 
         self.driver = webdriver.PhantomJS(service_args=['--ssl-protocol=any'])
         self.set_preferred_player()
+
+    @staticmethod
+    def prepare_path(path):
+        """
+        Remove all / from end of path name
+
+        :param path: Path name to prepare
+        :return: Prepared path name
+        """
+
+        while path.endswith('/'):
+            path = path[:-1]
+
+        return path
+
+    @staticmethod
+    def dashed_to_dotted(string):
+        """
+        Replace dash with dot in string
+
+        :param string: String to parse
+        :return Parsed string
+        """
+
+        return string.replace('-', '.').lower()
 
     @staticmethod
     def is_valid_url(url):
@@ -91,6 +116,10 @@ class NRKDownloader:
         return info
 
     def set_preferred_player(self):
+        """
+        Set preferred video player in the NRK website
+        """
+
         self.driver.get('https://tv.nrk.no/innstillinger')
 
         self.driver.find_element(By.ID, 'rbhlslinkodm').click()
@@ -220,16 +249,6 @@ class NRKDownloader:
         else:
             logging.debug('No playlist URL found')
 
-    @staticmethod
-    def dashed_to_dotted(string):
-        """
-        Replace dash with dot in string
-
-        :param string: String to edit
-        """
-
-        return string.replace('-', '.').lower()
-
     def generate_file_name(self, info):
         """
         Generate episode file name
@@ -247,7 +266,13 @@ class NRKDownloader:
 
         return file_name
 
-    def download_episode(self, playlist_url, debug=False):
+    def generate_file_path(self, path, file_name):
+        if path is '':
+            return file_name
+
+        return '%s/%s' % (path, file_name)
+
+    def download_episode(self, playlist_url):
         """
         Download episode from playlist URL
 
@@ -255,6 +280,7 @@ class NRKDownloader:
         """
 
         file_name = '%s.%s' % (self.generate_file_name(playlist_url['info']), self.file_extension)
+        file_path = self.generate_file_path(self.download_path, file_name)
 
         logging.info('%s: Downloading episode to file' % file_name)
         logging.debug('Playlist URL: %s' % playlist_url['url'])
@@ -263,25 +289,31 @@ class NRKDownloader:
             'ffmpeg',
             '-i',
             playlist_url['url'],
-            '%s%s' % (self.path, file_name)
+            file_path,
+            '-c',
+            'copy',
         ]
 
-        if debug:
-            pipe = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        else:
+        if self.debug:
             pipe = subprocess.Popen(args)
+        else:
+            pipe = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         pipe.communicate()
 
-    def download_multiple(self, urls, debug=False):
+    def start(self):
+        """
+        Start the process of downloading URLs
+        """
+
         success = True
 
-        for url in urls:
-            success = success and self.download(url, debug)
+        for url in self.urls:
+            success = success and self.download(url)
 
         return success
 
-    def download(self, url, debug=False):
+    def download(self, url):
         """
         Download episode(s) from NRK TV URL
 
@@ -300,8 +332,9 @@ class NRKDownloader:
             return False
 
         try:
-            url_info = self.get_url_info(url)
+            logging.info('Fetching episode information for episode %s' % url)
 
+            url_info = self.get_url_info(url)
             episode_urls = self.get_episode_urls(url, url_info)
 
             for episode_url in episode_urls:
@@ -334,8 +367,20 @@ class NRKDownloader:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-u', '--urls', type=str, help='Comma separated list of NRK URLS')
-    parser.add_argument('--debug', help='Show debug output', action="store_true")
+    file_extensions = ('mkv', 'avi', )
+
+    parser.add_argument(
+        '-u', '--urls', help='Comma separated list of NRK URLs', type=str, required=True
+    )
+    parser.add_argument(
+        '-e', '--extension', help='File extension for downloaded files',
+        choices=file_extensions, default=file_extensions[0]
+    )
+    parser.add_argument(
+        '-s', '--save_dir', help='Path to save downloaded files in. Defaults to current path',
+        default=''
+    )
+    parser.add_argument('--debug', help='Show debug output', action='store_true')
 
     args = parser.parse_args()
 
@@ -344,4 +389,4 @@ if __name__ == "__main__":
     else:
         logging.basicConfig(level=logging.INFO)
 
-    NRKDownloader().download_multiple(args.urls.split(','), debug=args.debug)
+    NRKDownloader(args).start()
