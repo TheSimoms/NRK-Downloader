@@ -3,6 +3,7 @@ import subprocess
 import logging
 import os
 import argparse
+import requests
 
 from bs4 import BeautifulSoup
 
@@ -24,7 +25,31 @@ except ImportError:
 
 
 NRK_URL_PREFIX = 'https://tv.nrk.no'
-NRK_URL_REGEX_PREFIX = '(?:https?://)tv\.nrk\.no/'
+NRK_URL_REGEX_PREFIX = re.compile('(?:https?://)tv\.nrk\.no/')
+
+PLAYLIST_REGEX = re.compile(
+    '.*' +
+    'BANDWIDTH=(?P<bandwidth>\d+),.*' +
+    'RESOLUTION=(?P<width>\d+)x(?P<height>\d+),.*' +
+    'URL\="(?P<url>.*)"'
+)
+
+
+class Quality:
+    def __init__(self, bandwidth, width, height, url):
+        self.bandwidth = int(bandwidth)
+        self.resolution = (self.width, self.height) = (int(width), int(height))
+        self.url = url
+
+    def __gt__(self, other):
+        return (self.bandwidth > other.bandwidth or
+                self.width > other.width or
+                self.height > other.height)
+
+    def __str__(self):
+        return 'BANDWIDTH=%s,RESOLUTION=%sx%s,URL=%s' % (
+            self.bandwidth, self.width, self.height, self.url
+        )
 
 
 class NRKDownloader:
@@ -72,7 +97,7 @@ class NRKDownloader:
         :return: Whether the URL is valid or not
         """
 
-        return re.match(NRK_URL_REGEX_PREFIX, url) is not None
+        return NRK_URL_REGEX_PREFIX.match(url) is not None
 
     @staticmethod
     def parse_url(url):
@@ -220,6 +245,47 @@ class NRKDownloader:
 
         return self.get_show_episode_urls(url)
 
+    def extract_playlist_qualities(self, url):
+        """
+        Extract playlist qualities from playlist URL
+
+        :param url: Episode playlist URL
+        :return: Object containing different qualities and corresponding playlist URLs
+        """
+
+        try:
+            playlist = requests.get(url).text.split('\n')[1:-1]
+            qualities = []
+
+            for quality in [
+                '%s,URL="%s"' % (playlist[i], playlist[i+1]) for i in range(0, len(playlist)-1, 2)
+            ]:
+                match = PLAYLIST_REGEX.match(quality)
+
+                if match is not None:
+                    qualities.append(Quality(
+                        match.group('bandwidth'),
+                        match.group('width'),
+                        match.group('height'),
+                        match.group('url'))
+                    )
+
+            return qualities
+        except Exception as e:
+            return None
+
+    def get_best_episode_playlist(self, url):
+        """
+        Select the best available video quality from set of available qualities
+
+        :param qualities: Object containing the available qualities
+        :return: Playlist URL for the best available quality
+        """
+
+        return url.replace(
+            'master.m3u8', sorted(self.extract_playlist_qualities(url), reverse=True)[0].url
+        )
+
     def get_episode_playlist_url(self, url):
         """
         Fetch episode playlist URL for episode
@@ -239,14 +305,11 @@ class NRKDownloader:
 
             playlist_url = playlist_url.replace('/z/', '/i/')
             playlist_url = playlist_url.replace('manifest.f4m', 'master.m3u8')
-            playlist_url = playlist_url.replace('master.m3u8', 'index_4_av.m3u8')
 
-            playlist_url = {
-                'url': playlist_url,
+            return {
+                'url': self.get_best_episode_playlist(playlist_url),
                 'info': url['info']
             }
-
-            return playlist_url
         else:
             logging.debug('No playlist URL found')
 
