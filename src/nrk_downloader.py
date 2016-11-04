@@ -58,6 +58,7 @@ class NRKDownloader:
         self.file_extension = args.extension
         self.download_path = self.prepare_path(args.save_dir)
         self.include_subtitles = args.subtitles
+        self.only_subtitles = args.novid
         self.debug = args.debug
 
         self.driver = webdriver.PhantomJS(service_args=['--ssl-protocol=any'])
@@ -306,10 +307,7 @@ class NRKDownloader:
             playlist_url = playlist_url.replace('/z/', '/i/')
             playlist_url = playlist_url.replace('manifest.f4m', 'master.m3u8')
 
-            return {
-                'url': self.get_best_episode_playlist(playlist_url),
-                'info': url['info']
-            }
+            return self.get_best_episode_playlist(playlist_url)
         else:
             logging.debug('No playlist URL found')
 
@@ -370,32 +368,34 @@ class NRKDownloader:
 
         pipe.communicate()
 
-    def download_episode(self, episode_url, subtitle_url=None):
+    def download_episode(self, info, episode_url=None, subtitle_url=None):
         """
         Download episode from playlist URL
 
+        :param info: Episode info
         :param episode_url: URL to episode
         :param subtitle_url: URL to subtitles
         """
 
-        file_path = self.generate_file_path(
-            self.download_path, self.generate_file_name(episode_url['info'])
-        )
+        file_name = self.generate_file_name(info)
+        file_path = self.generate_file_path(self.download_path, file_name)
 
         episode_path = '%s.%s' % (file_path, self.file_extension)
         subtitle_path = '%s.vtt' % file_path
 
-        logging.info('%s: Downloading episode to file' % episode_path)
-        logging.debug('Playlist URL: %s' % episode_url['url'])
+        logging.info('%s: Downloading episode: ' % file_name)
+        logging.debug('Playlist URL: %s' % episode_url)
+        logging.debug('Subtitle URL: %s' % episode_url)
 
-        self.run_system_command([
-            'ffmpeg',
-            '-i',
-            episode_url['url'],
-            episode_path,
-            '-c',
-            'copy',
-        ])
+        if episode_url is not None:
+            self.run_system_command([
+                'ffmpeg',
+                '-i',
+                episode_url,
+                episode_path,
+                '-c',
+                'copy',
+            ])
 
         if subtitle_url is not None:
             self.run_system_command([
@@ -445,14 +445,16 @@ class NRKDownloader:
 
             for episode_url in episode_urls:
                 try:
-                    episode_playlist_url = self.get_episode_playlist_url(episode_url)
-                    subtitle_playlist_url = None
+                    args = {}
 
-                    if self.include_subtitles:
-                        subtitle_playlist_url = self.get_subtitle_playlist_url(episode_url)
+                    if not self.only_subtitles:
+                        args['episode_url'] = self.get_episode_playlist_url(episode_url)
+
+                    if self.include_subtitles or self.only_subtitles:
+                        args['subtitle_url'] = self.get_subtitle_playlist_url(episode_url)
 
                     if episode_url is not None:
-                        self.download_episode(episode_playlist_url, subtitle_playlist_url)
+                        self.download_episode(episode_url['info'], **args)
                 except KeyboardInterrupt:
                     logging.info('Stopping download')
 
@@ -491,6 +493,7 @@ if __name__ == "__main__":
         default=''
     )
     parser.add_argument('--subtitles', help='Include subtitles', action='store_true')
+    parser.add_argument('--novid', help='Download only subtitles', action='store_true')
     parser.add_argument('--debug', help='Show debug output', action='store_true')
 
     args = parser.parse_args()
