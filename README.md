@@ -14,5 +14,7 @@ The downloader uses episode URLs (for example https://tv.nrk.no/serie/side-om-si
 ## Running
 The downloader can be run using the command line.
 
-To use the downloader, run the file [nrk_downloader.py](src/nrk_downloader.py).
+To use the downloader, run the file [main.py](src/main.py).
 URLs are supplied as command line arguments.
+
+Run ``python3 src/main.py -h`` for instructions on how to use the script.

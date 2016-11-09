@@ -2,7 +2,6 @@ import re
 import subprocess
 import logging
 import os
-import argparse
 import requests
 
 from bs4 import BeautifulSoup
@@ -58,7 +57,7 @@ class NRKDownloader:
         self.file_extension = args.extension
         self.download_path = self.prepare_path(args.save_dir)
         self.include_subtitles = args.subtitles
-        self.only_subtitles = args.novid
+        self.only_subtitles = args.subtitles_only
         self.debug = args.debug
 
         self.driver = webdriver.PhantomJS(service_args=['--ssl-protocol=any'])
@@ -325,6 +324,30 @@ class NRKDownloader:
             episode_id[:6], episode_id[6:8], episode_id
         )
 
+    def get_season_and_episode_number(self, info):
+        """
+        Extract season and episode number for episode
+
+        :param info: Information about episode
+        :return Episode season and episdoe numbers, if any
+        """
+
+        res = {}
+
+        for part, search in (('season', 'sesong'), ('episode', 'episode')):
+            if part in info:
+                match = re.match('%s-(\d+)' % search, info[part])
+
+                if match is not None:
+                    number = match.group(1)
+
+                    if len(number) is 1:
+                        number = '0' + number
+
+                    res[part] = number
+
+        return res
+
     def generate_file_name(self, info):
         """
         Generate episode file name
@@ -333,12 +356,21 @@ class NRKDownloader:
         :return Episode file name
         """
 
-        file_name = self.dashed_to_dotted(info['show'])
+        file_name = '%s.' % self.dashed_to_dotted(info['show']).capitalize()
+        season_and_episode_number = self.get_season_and_episode_number(info)
 
-        if 'season' in info:
-            file_name += '.%s' % self.dashed_to_dotted(info['season'])
-
-        file_name += '.%s' % self.dashed_to_dotted(info['episode'])
+        if 'season' in season_and_episode_number:
+            file_name += 'S%sE%s' % (
+                season_and_episode_number['season'], season_and_episode_number['episode']
+            )
+        elif 'season' in info:
+            file_name += '%s.%s' % (
+                self.dashed_to_dotted(info['season']), self.dashed_to_dotted(info['episode'])
+            )
+        elif 'episode' in season_and_episode_number:
+            file_name += season_and_episode_number['episode']
+        else:
+            file_name += self.dashed_to_dotted(info['episode'])
 
         return file_name
 
@@ -474,33 +506,3 @@ class NRKDownloader:
             return False
 
         return True and success
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    file_extensions = ('mkv', 'avi', )
-
-    parser.add_argument(
-        '-u', '--urls', help='Comma separated list of NRK URLs', type=str, required=True
-    )
-    parser.add_argument(
-        '-e', '--extension', help='File extension for downloaded files',
-        choices=file_extensions, default=file_extensions[0]
-    )
-    parser.add_argument(
-        '-s', '--save_dir', help='Path to save downloaded files in. Defaults to current path',
-        default=''
-    )
-    parser.add_argument('--subtitles', help='Include subtitles', action='store_true')
-    parser.add_argument('--novid', help='Download only subtitles', action='store_true')
-    parser.add_argument('--debug', help='Show debug output', action='store_true')
-
-    args = parser.parse_args()
-
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-    NRKDownloader(args).start()
