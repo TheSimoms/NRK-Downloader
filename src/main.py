@@ -17,12 +17,12 @@ if __name__ == "__main__":
         choices=file_extensions, default=file_extensions[0]
     )
     parser.add_argument(
-        '-s', '--save_dir', help='Path to save downloaded files in.',
-        default=''
+        '-s', '--save_dir', help='Path to save downloaded files in.', default=''
     )
     parser.add_argument('--subtitles', help='Include subtitles', action='store_true')
     parser.add_argument('--subtitles_only', help='Download only subtitles', action='store_true')
     parser.add_argument('--debug', help='Show debug output', action='store_true')
+    parser.add_argument('--silent', help='Hide browser window', action='store_true')
 
     args = parser.parse_args()
 

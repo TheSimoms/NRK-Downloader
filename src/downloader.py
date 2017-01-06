@@ -8,7 +8,6 @@ from bs4 import BeautifulSoup
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as ec
 
@@ -60,7 +59,11 @@ class NRKDownloader:
         self.only_subtitles = args.subtitles_only
         self.debug = args.debug
 
-        self.driver = webdriver.PhantomJS(service_args=['--ssl-protocol=any'])
+        if args.silent:
+            self.driver = webdriver.PhantomJS(service_args=['--ssl-protocol=any'])
+        else:
+            self.driver = webdriver.Firefox()
+
         self.set_preferred_player()
 
     @staticmethod
@@ -143,13 +146,30 @@ class NRKDownloader:
 
     def set_preferred_player(self):
         """
-        Set preferred video player in the NRK website
+        Set preferred video player in the NRK website using the settings page
         """
 
         self.driver.get('https://tv.nrk.no/innstillinger')
 
         self.driver.find_element(By.ID, 'rbhlslinkodm').click()
         self.driver.find_element(By.CLASS_NAME, 'save-settings').click()
+
+        WebDriverWait(self.driver, 5).until(ec.visibility_of_element_located((
+            By.CLASS_NAME, 'settings-saved-notification'
+        )))
+
+    def set_preferred_player_by_cookie(self):
+        """
+        Set preferred video player in the NRK website using cookies
+        """
+
+        self.driver.get(NRK_URL_PREFIX)
+
+        self.driver.add_cookie({
+            'name': 'NRK_PLAYER_SETTINGS_TV',
+            'value': 'preferred-player-odm=hlslink&'
+                    'preferred-player-live=hlslink&max-data-rate=3500'
+        })
 
     def get_url_soup(self, url, wait_for_player=False):
         """
@@ -271,7 +291,7 @@ class NRKDownloader:
                     )
 
             return qualities
-        except Exception as e:
+        except Exception:
             return None
 
     def get_best_episode_playlist(self, url):
@@ -415,7 +435,7 @@ class NRKDownloader:
         episode_path = '%s.%s' % (file_path, self.file_extension)
         subtitle_path = '%s.vtt' % file_path
 
-        logging.info('%s: Downloading episode: ' % file_name)
+        logging.info('Downloading episode: %s' % file_name)
         logging.debug('Playlist URL: %s' % episode_url)
         logging.debug('Subtitle URL: %s' % episode_url)
 
@@ -461,7 +481,6 @@ class NRKDownloader:
 
         logging.info('URL: %s' % url)
 
-        success = True
         url = self.parse_url(url)
 
         if not self.is_valid_url(url):
@@ -469,40 +488,29 @@ class NRKDownloader:
 
             return False
 
-        try:
-            logging.info('Fetching episode information for episode %s' % url)
+        url_info = self.get_url_info(url)
+        episodes = self.get_episode_urls(url, url_info)
 
-            url_info = self.get_url_info(url)
-            episode_urls = self.get_episode_urls(url, url_info)
+        logging.info('%s: Fetching episode playlist URLs' % url)
 
-            for episode_url in episode_urls:
-                try:
-                    args = {}
+        for episode in episodes:
+            try:
+                episode['urls'] = {}
 
-                    if not self.only_subtitles:
-                        args['episode_url'] = self.get_episode_playlist_url(episode_url)
+                if not self.only_subtitles:
+                    episode['urls']['episode_url'] = self.get_episode_playlist_url(episode)
 
-                    if self.include_subtitles or self.only_subtitles:
-                        args['subtitle_url'] = self.get_subtitle_playlist_url(episode_url)
+                if self.include_subtitles or self.only_subtitles:
+                    episode['urls']['subtitle_url'] = self.get_subtitle_playlist_url(episode)
+            except KeyboardInterrupt:
+                logging.info('Stopping download')
 
-                    if episode_url is not None:
-                        self.download_episode(episode_url['info'], **args)
-                except KeyboardInterrupt:
-                    logging.info('Stopping download')
+                return False
 
-                    return False
-                except Exception as e:
-                    logging.error(
-                        '%s: Could not download episode\nReason: %s' % (episode_url['url'], e)
-                    )
+        self.driver.quit()
 
-                    success = False
+        logging.info('Downloading episodes')
 
-            logging.info('Download complete')
-        except Exception as e:
-            logging.error('%s: An unknown error occurred. Skipping' % url)
-            logging.error('Reason: %s' % e)
-
-            return False
-
-        return True and success
+        for episode in episodes:
+            if episode is not None:
+                self.download_episode(episode['info'], **episode['urls'])
