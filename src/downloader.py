@@ -406,6 +406,8 @@ class NRKDownloader:
         if path is '':
             return file_name
 
+        os.makedirs(path, exist_ok=True)
+
         return '%s/%s' % (path, file_name)
 
     def run_system_command(self, args):
