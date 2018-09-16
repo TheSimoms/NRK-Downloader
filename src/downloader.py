@@ -8,13 +8,11 @@ from bs4 import BeautifulSoup
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as ec
 
-try:
-    from urllib.parse import urlparse
-except ImportError:
-    from urllib2 import urlparse
+from urllib.parse import urlparse
 
 try:
     from subprocess import DEVNULL
@@ -64,7 +62,10 @@ class NRKDownloader:
         else:
             self.driver = webdriver.Firefox()
 
-        self.set_preferred_player()
+        try:
+            self.set_preferred_player()
+        except NoSuchElementException:
+            pass
 
     @staticmethod
     def prepare_path(path):
@@ -176,6 +177,7 @@ class NRKDownloader:
         Get BeautifulSoup for URL
 
         :param url: URL to get soup for
+        :param wait_for_player: Whether to wait for player to load
         :return: Soup for URL
         """
 
@@ -197,6 +199,7 @@ class NRKDownloader:
         Get URLs for episode list for each season in show
 
         :param url: Show URL
+        :param info: Show info
         :return: List of episode list URLs
         """
 
@@ -252,6 +255,7 @@ class NRKDownloader:
         Convert general NRK URL to list of episode URLs
 
         :param url: URL specified by the user. Might be show, season or episode URL
+        :param url_info: URL info
         :return: List of episode URLs
         """
 
@@ -265,7 +269,8 @@ class NRKDownloader:
 
         return self.get_show_episode_urls(url)
 
-    def extract_playlist_qualities(self, url):
+    @staticmethod
+    def extract_playlist_qualities(url):
         """
         Extract playlist qualities from playlist URL
 
@@ -294,16 +299,16 @@ class NRKDownloader:
         except Exception:
             return None
 
-    def get_best_episode_playlist(self, url):
+    def get_best_episode_playlist(self, playlist_url):
         """
         Select the best available video quality from set of available qualities
 
-        :param qualities: Object containing the available qualities
+        :param playlist_url: URL to get episode from
         :return: Playlist URL for the best available quality
         """
 
-        return url.replace(
-            'master.m3u8', sorted(self.extract_playlist_qualities(url), reverse=True)[0].url
+        return playlist_url.replace(
+            'master.m3u8', sorted(self.extract_playlist_qualities(playlist_url), reverse=True)[0].url
         )
 
     def get_episode_playlist_url(self, url):
@@ -330,7 +335,8 @@ class NRKDownloader:
         else:
             logging.debug('No playlist URL found')
 
-    def get_subtitle_playlist_url(self, url):
+    @staticmethod
+    def get_subtitle_playlist_url(url):
         """
         Fetch subtitle playlist URL for episode
 
@@ -344,7 +350,8 @@ class NRKDownloader:
             episode_id[:6], episode_id[6:8], episode_id
         )
 
-    def get_season_and_episode_number(self, info):
+    @staticmethod
+    def get_season_and_episode_number(info):
         """
         Extract season and episode number for episode
 
@@ -394,7 +401,8 @@ class NRKDownloader:
 
         return file_name
 
-    def generate_file_path(self, path, file_name):
+    @staticmethod
+    def generate_file_path(path, file_name):
         """
         Generate full file path from path name and file name
 
