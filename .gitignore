@@ -1,5 +1,6 @@
-# IDEA
+# IDEs
 .idea/
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -60,3 +61,6 @@ docs/_build/
 target/
 
 *.log
+
+# Virtual env
+ENV
